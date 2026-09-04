@@ -40,13 +40,16 @@ const FLAKE_APPLY_SNIPPET: &str = formatcp!(
 
 #[derive(Debug, Clone)]
 pub enum HivePath {
+    /// A `default.nix` with the `colmena` output.
+    Nix(PathBuf),
+
     /// A Nix Flake.
     ///
     /// The flake must contain the `colmena` output.
-    Flake(Flake),
+    LegacyFlake(Flake),
 
-    /// A regular .nix file
-    Legacy(PathBuf),
+    /// A hive.nix file with `mkHive` inputs
+    LegacyHive(PathBuf),
 }
 
 impl FromStr for HivePath {
@@ -65,7 +68,9 @@ impl FromStr for HivePath {
 
                 tracing::info!("Using flake: {}", flake.uri());
 
-                Ok(Self::Flake(flake))
+                Ok(Self::LegacyFlake(flake))
+            } else if path.join("hive.nix").exists() && !path.join("default.nix").exists() {
+                HivePath::from_path(path.join("hive.nix")).await
             } else {
                 HivePath::from_path(path).await
             }
@@ -148,20 +153,26 @@ impl HivePath {
         {
             let parent = path.parent().unwrap();
             let flake = Flake::from_dir(parent).await?;
-            return Ok(Self::Flake(flake));
+            return Ok(Self::LegacyFlake(flake));
+        }
+        else if let Some(osstr) = path.file_name()
+            && osstr == "hive.nix"
+        {
+            return Ok(Self::LegacyHive(path.canonicalize()?));
         }
 
-        Ok(Self::Legacy(path.canonicalize()?))
+        Ok(Self::Nix(path.canonicalize()?))
     }
 
     fn is_flake(&self) -> bool {
-        matches!(self, Self::Flake(_))
+        matches!(self, Self::LegacyFlake(_))
     }
 
     fn context_dir(&self) -> Option<PathBuf> {
         match self {
-            Self::Legacy(p) => p.parent().map(|d| d.to_owned()),
-            Self::Flake(flake) => flake.local_dir().map(|d| d.to_owned()),
+            Self::LegacyHive(p) => p.parent().map(|d| d.to_owned()),
+            Self::Nix(p) => { if p.is_dir() { Some(p.to_path_buf()) } else { p.parent().map(|d| d.to_owned()) } },
+            Self::LegacyFlake(flake) => flake.local_dir().map(|d| d.to_owned()),
         }
     }
 }
@@ -486,12 +497,12 @@ impl Hive {
 
     /// Returns whether this Hive is a flake.
     fn is_flake(&self) -> bool {
-        matches!(self.path(), HivePath::Flake(_))
+        matches!(self.path(), HivePath::LegacyFlake(_))
     }
 
     /// Returns the full `colmenaHive` acceesor or `None` if not a flake.
     fn flake_installable(&self) -> Option<String> {
-        if let HivePath::Flake(flake) = self.path() {
+        if let HivePath::LegacyFlake(flake) = self.path() {
             Some(format!("{}#colmenaHive", flake.uri()))
         } else {
             None

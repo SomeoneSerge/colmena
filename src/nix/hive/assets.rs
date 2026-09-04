@@ -43,7 +43,7 @@ impl Assets {
 
         let mut assets_flake_uri = None;
 
-        if let HivePath::Flake(hive_flake) = &hive_path {
+        if let HivePath::LegacyFlake(hive_flake) = &hive_path {
             // Emit a temporary flake, then resolve the locked URI
             let flake_nix = FLAKE_NIX.replace("%hive%", hive_flake.locked_uri());
             create_file(&temp_dir, "flake.nix", false, flake_nix.as_bytes())?;
@@ -70,7 +70,7 @@ impl Assets {
     /// Returns the base expression from which the evaluated Hive can be used.
     pub fn get_base_expression(&self) -> String {
         match &self.hive_path {
-            HivePath::Legacy(path) => {
+            HivePath::LegacyHive(path) => {
                 format!(
                     "with builtins; let eval = import {eval_nix}; hive = eval {{ rawHive = import {path}; colmenaOptions = import {options_nix}; colmenaModules = import {modules_nix}; }}; in ",
                     path = path.to_str().unwrap(),
@@ -79,7 +79,13 @@ impl Assets {
                     modules_nix = self.get_path("modules.nix"),
                 )
             }
-            HivePath::Flake(_) => {
+            HivePath::Nix(path) => {
+                format!(
+                    "with builtins; let autocall = f: if isFunction f then f {{ }} else f; entry = autocall (import {path}); inherit (entry) hive; in ",
+                    path = path.to_str().unwrap(),
+                )
+            }
+            HivePath::LegacyFlake(_) => {
                 format!(
                     "with builtins; let assets = getFlake \"{assets_flake_uri}\"; hive = assets.processFlake; in ",
                     assets_flake_uri = self

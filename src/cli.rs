@@ -231,6 +231,12 @@ async fn get_hive(opts: &Opts) -> ColmenaResult<Hive> {
             let mut file_path = None;
 
             loop {
+                let entry = cur.join("default.nix");
+                if entry.is_file() {
+                    file_path = Some(entry);
+                    break;
+                }
+
                 let flake = cur.join("flake.nix");
                 if flake.is_file() {
                     file_path = Some(flake);
@@ -255,7 +261,7 @@ async fn get_hive(opts: &Opts) -> ColmenaResult<Hive> {
 
             if file_path.is_none() {
                 tracing::error!(
-                    "Could not find `hive.nix` or `flake.nix` in {:?} or any parent directory",
+                    "Could not find `default.nix`, `hive.nix`, or `flake.nix` in {:?} or any parent directory",
                     std::env::current_dir()?
                 );
             }
@@ -265,10 +271,13 @@ async fn get_hive(opts: &Opts) -> ColmenaResult<Hive> {
     };
 
     match &path {
-        HivePath::Legacy(p) => {
+        HivePath::Nix(p) => {
+            tracing::info!("Using nix entrypoint: {}", p.to_string_lossy());
+        }
+        HivePath::LegacyHive(p) => {
             tracing::info!("Using configuration: {}", p.to_string_lossy());
         }
-        HivePath::Flake(flake) => {
+        HivePath::LegacyFlake(flake) => {
             tracing::info!("Using flake: {}", flake.uri());
         }
     }
